@@ -73,6 +73,7 @@
             </div>
             
             <div class="tab-content active" id="summaryTab">
+                <div id="configInfo" class="config-info"></div>
                 <div class="stats-grid">
                     <div class="stat-card">
                         <div class="stat-value" id="meanValue">-</div>
@@ -106,6 +107,10 @@
                             <th>Valeur</th>
                         </tr>
                         <tr>
+                            <td>Nombre total de données</td>
+                            <td id="totalData">-</td>
+                        </tr>
+                        <tr>
                             <td>Nombre d'échantillons</td>
                             <td id="sampleCount">-</td>
                         </tr>
@@ -129,6 +134,18 @@
                             <td>Variance</td>
                             <td id="variance">-</td>
                         </tr>
+                        <tr>
+                            <td>Minimum</td>
+                            <td id="minValue">-</td>
+                        </tr>
+                        <tr>
+                            <td>Maximum</td>
+                            <td id="maxValue">-</td>
+                        </tr>
+                        <tr>
+                            <td>Étendue totale</td>
+                            <td id="totalRange">-</td>
+                        </tr>
                     </table>
                 </div>
                 
@@ -136,6 +153,13 @@
                 <div class="table-container">
                     <table id="rawDataTable">
                         <!-- Données brutes affichées dynamiquement -->
+                    </table>
+                </div>
+                
+                <h3>Statistiques par Échantillon</h3>
+                <div class="table-container">
+                    <table id="sampleStatsTable">
+                        <!-- Statistiques par échantillon affichées dynamiquement -->
                     </table>
                 </div>
             </div>
@@ -161,6 +185,11 @@
                             <td>Valeur critique (5%)</td>
                             <td id="criticalValue">-</td>
                             <td>-</td>
+                        </tr>
+                        <tr>
+                            <td>Valeur p</td>
+                            <td id="pValue">-</td>
+                            <td id="pValueInt">-</td>
                         </tr>
                         <tr>
                             <td>Conclusion</td>
@@ -201,6 +230,21 @@
                             <td>Cmk (Capabilité machine centrée)</td>
                             <td id="cmkResult">-</td>
                             <td id="cmkInterpretation">-</td>
+                        </tr>
+                        <tr>
+                            <td>Sigma_i (variation intra-échantillon)</td>
+                            <td id="sigmaIValue">-</td>
+                            <td>-</td>
+                        </tr>
+                        <tr>
+                            <td>TS - TI (Tolérance)</td>
+                            <td id="toleranceRange">-</td>
+                            <td>-</td>
+                        </tr>
+                        <tr>
+                            <td>% hors tolérance estimé</td>
+                            <td id="outOfTolerance">-</td>
+                            <td>-</td>
                         </tr>
                     </table>
                 </div>
@@ -245,6 +289,22 @@
                         <tr>
                             <td>LIC R</td>
                             <td id="rLcl">-</td>
+                        </tr>
+                        <tr>
+                            <td>Constante A2</td>
+                            <td id="a2Value">-</td>
+                        </tr>
+                        <tr>
+                            <td>Constante D3</td>
+                            <td id="d3Value">-</td>
+                        </tr>
+                        <tr>
+                            <td>Constante D4</td>
+                            <td id="d4Value">-</td>
+                        </tr>
+                        <tr>
+                            <td>Constante d2</td>
+                            <td id="d2Value">-</td>
                         </tr>
                     </table>
                 </div>

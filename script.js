@@ -1,4 +1,4 @@
-// Variables globales
+// Variables globales optimisées
 let dataSamples = [];
 let rawData = [];
 let analysisResults = {};
@@ -9,28 +9,82 @@ let charts = {
     r: null
 };
 
-// Initialisation
-document.addEventListener('DOMContentLoaded', function() {
+// Configuration des échantillons (sauvegarde des paramètres utilisateur)
+let userSampleConfig = {
+    sampleCount: 3,
+    sampleSize: 5
+};
+
+// Constantes pour les calculs statistiques
+const SHAPIRO_COEFFICIENTS = {
+    3: [0.7071],
+    4: [0.6872, 0.1677],
+    5: [0.6646, 0.2413],
+    6: [0.6431, 0.2806, 0.0875],
+    7: [0.6233, 0.3031, 0.1401],
+    8: [0.6052, 0.3164, 0.1743, 0.0561],
+    9: [0.5888, 0.3244, 0.1976, 0.0947],
+    10: [0.5739, 0.3291, 0.2141, 0.1224, 0.0399]
+};
+
+const SHAPIRO_CRITICAL_VALUES = {
+    3: 0.767, 4: 0.748, 5: 0.762, 6: 0.788, 7: 0.803,
+    8: 0.818, 9: 0.829, 10: 0.842, 15: 0.881, 20: 0.905,
+    25: 0.918, 30: 0.927, 40: 0.941, 50: 0.947
+};
+
+const D2_VALUES = {
+    2: 1.128, 3: 1.693, 4: 2.059, 5: 2.326,
+    6: 2.534, 7: 2.704, 8: 2.847, 9: 2.970, 10: 3.078
+};
+
+const A2_VALUES = {
+    2: 1.880, 3: 1.023, 4: 0.729, 5: 0.577,
+    6: 0.483, 7: 0.419, 8: 0.373, 9: 0.337, 10: 0.308
+};
+
+const D3_VALUES = {
+    2: 0, 3: 0, 4: 0, 5: 0,
+    6: 0, 7: 0.076, 8: 0.136, 9: 0.184, 10: 0.223
+};
+
+const D4_VALUES = {
+    2: 3.267, 3: 2.574, 4: 2.282, 5: 2.114,
+    6: 2.004, 7: 1.924, 8: 1.864, 9: 1.816, 10: 1.777
+};
+
+// Fonction d'initialisation optimisée
+function initializeApp() {
     initializeInputArea();
     setupEventListeners();
-});
+    validateInputs();
+}
 
-// Initialise la zone de saisie selon le type choisi
+// Fonction d'initialisation de la zone de saisie
 function initializeInputArea() {
     const dataType = document.getElementById('dataType').value;
     const inputArea = document.getElementById('inputArea');
     
     if (dataType === 'sample') {
+        // Récupérer les valeurs actuelles
+        const sampleCountInput = document.getElementById('sampleCount');
+        const sampleSizeInput = document.getElementById('sampleSize');
+        
+        if (sampleCountInput && sampleSizeInput) {
+            userSampleConfig.sampleCount = parseInt(sampleCountInput.value) || 3;
+            userSampleConfig.sampleSize = parseInt(sampleSizeInput.value) || 5;
+        }
+        
         inputArea.innerHTML = `
             <div class="form-group">
                 <label for="sampleCount">Nombre d'échantillons (k) :</label>
-                <input type="number" id="sampleCount" min="2" max="10" value="3">
+                <input type="number" id="sampleCount" min="2" max="10" value="${userSampleConfig.sampleCount}">
                 <span class="help-text">Maximum 10 échantillons (n*k ≤ 50)</span>
             </div>
             
             <div class="form-group">
                 <label for="sampleSize">Taille des échantillons (n) :</label>
-                <input type="number" id="sampleSize" min="2" max="25" value="5">
+                <input type="number" id="sampleSize" min="2" max="25" value="${userSampleConfig.sampleSize}">
                 <span class="help-text">Maximum 25 mesures par échantillon (n*k ≤ 50)</span>
             </div>
             
@@ -44,9 +98,22 @@ function initializeInputArea() {
         
         generateSampleTable();
         
-        // Écouteurs pour la mise à jour du tableau
-        document.getElementById('sampleCount').addEventListener('change', generateSampleTable);
-        document.getElementById('sampleSize').addEventListener('change', generateSampleTable);
+        // Écouteurs avec debouncing pour améliorer les performances
+        let debounceTimer;
+        const debounce = (func, delay) => {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(func, delay);
+        };
+        
+        ['sampleCount', 'sampleSize'].forEach(id => {
+            document.getElementById(id).addEventListener('input', () => {
+                debounce(() => {
+                    userSampleConfig.sampleCount = parseInt(document.getElementById('sampleCount').value) || 3;
+                    userSampleConfig.sampleSize = parseInt(document.getElementById('sampleSize').value) || 5;
+                    generateSampleTable();
+                }, 300);
+            });
+        });
     } else {
         inputArea.innerHTML = `
             <div class="form-group">
@@ -58,183 +125,327 @@ function initializeInputArea() {
     }
 }
 
-// Génère le tableau de saisie pour les échantillons
+// Génération optimisée du tableau d'échantillons
 function generateSampleTable() {
-    const sampleCount = parseInt(document.getElementById('sampleCount').value) || 3;
-    const sampleSize = parseInt(document.getElementById('sampleSize').value) || 5;
+    const sampleCount = Math.min(Math.max(userSampleConfig.sampleCount, 2), 10);
+    const sampleSize = Math.min(Math.max(userSampleConfig.sampleSize, 2), 25);
+    
+    // Validation du produit n*k
+    if (sampleCount * sampleSize > 50) {
+        alert('Le produit n*k ne doit pas dépasser 50. Ajustez les valeurs.');
+        userSampleConfig.sampleSize = Math.floor(50 / sampleCount);
+        document.getElementById('sampleSize').value = userSampleConfig.sampleSize;
+        return generateSampleTable();
+    }
+    
     const tableContainer = document.getElementById('sampleDataTable');
     
-    let tableHTML = '<table>';
+    let tableHTML = '<div class="table-container"><table><thead><tr><th class="sample-label">Échantillon</th>';
     
     // En-tête
-    tableHTML += '<tr><th>Échantillon</th>';
     for (let i = 1; i <= sampleSize; i++) {
-        tableHTML += `<th>Mesure ${i}</th>`;
+        tableHTML += `<th>M${i}</th>`;
     }
-    tableHTML += '</tr>';
+    tableHTML += '</tr></thead><tbody>';
     
     // Lignes de données
     for (let i = 1; i <= sampleCount; i++) {
-        tableHTML += `<tr><td>Éch. ${i}</td>`;
+        tableHTML += `<tr><td class="sample-label">Éch. ${i}</td>`;
         for (let j = 1; j <= sampleSize; j++) {
-            tableHTML += `<td><input type="number" step="0.001" id="sample-${i}-${j}" value="${19.9 + Math.random() * 0.2}"></td>`;
+            const inputId = `sample-${i}-${j}`;
+            const existingInput = document.getElementById(inputId);
+            const defaultValue = existingInput ? existingInput.value : (19.9 + Math.random() * 0.2).toFixed(3);
+            tableHTML += `<td><input type="number" step="0.001" id="${inputId}" value="${defaultValue}" data-sample="${i}" data-measure="${j}"></td>`;
         }
         tableHTML += '</tr>';
     }
     
-    tableHTML += '</table>';
+    tableHTML += '</tbody></table></div>';
     tableContainer.innerHTML = tableHTML;
 }
 
-// Configure les écouteurs d'événements
+// Configuration des écouteurs d'événements
 function setupEventListeners() {
     document.getElementById('dataType').addEventListener('change', initializeInputArea);
-    document.getElementById('calculateBtn').addEventListener('click', calculateStatistics);
+    document.getElementById('calculateBtn').addEventListener('click', handleCalculate);
     document.getElementById('resetBtn').addEventListener('click', resetApplication);
     document.getElementById('exportBtn').addEventListener('click', exportResults);
+    
+    // Validation en temps réel
+    ['ts', 'ti', 'nqa'].forEach(id => {
+        document.getElementById(id).addEventListener('input', validateInputs);
+    });
     
     // Gestion des onglets
     document.querySelectorAll('.tab').forEach(tab => {
         tab.addEventListener('click', function() {
-            // Désactiver tous les onglets
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            
-            // Activer l'onglet cliqué
-            this.classList.add('active');
-            const tabId = this.getAttribute('data-tab') + 'Tab';
-            document.getElementById(tabId).classList.add('active');
+            switchTab(this.dataset.tab);
         });
     });
 }
 
-// Réinitialise l'application
-function resetApplication() {
-    document.getElementById('resultsSection').style.display = 'none';
-    document.getElementById('exportBtn').disabled = true;
-    initializeInputArea();
+// Validation des entrées
+function validateInputs() {
+    const ts = parseFloat(document.getElementById('ts').value);
+    const ti = parseFloat(document.getElementById('ti').value);
+    const nqa = parseFloat(document.getElementById('nqa').value);
     
-    // Réinitialiser les graphiques
-    Object.values(charts).forEach(chart => {
-        if (chart) chart.destroy();
-    });
-    charts = {
-        normality: null,
-        capability: null,
-        xbar: null,
-        r: null
-    };
+    let isValid = true;
+    
+    if (isNaN(ts) || isNaN(ti)) {
+        isValid = false;
+        document.getElementById('ts').style.borderColor = 'var(--accent)';
+        document.getElementById('ti').style.borderColor = 'var(--accent)';
+    } else if (ts <= ti) {
+        isValid = false;
+        document.getElementById('ts').style.borderColor = 'var(--accent)';
+        document.getElementById('ti').style.borderColor = 'var(--accent)';
+        alert('TS doit être supérieure à TI');
+    } else {
+        document.getElementById('ts').style.borderColor = '';
+        document.getElementById('ti').style.borderColor = '';
+    }
+    
+    if (isNaN(nqa) || nqa < 0 || nqa > 100) {
+        isValid = false;
+        document.getElementById('nqa').style.borderColor = 'var(--accent)';
+        alert('NQA doit être un pourcentage entre 0 et 100');
+    } else {
+        document.getElementById('nqa').style.borderColor = '';
+    }
+    
+    return isValid;
 }
 
-// Calcule toutes les statistiques
-function calculateStatistics() {
+// Récupération des données d'échantillons - CORRIGÉE
+function getSampleData() {
+    const samples = [];
+    let totalValidValues = 0;
+    
+    for (let i = 1; i <= userSampleConfig.sampleCount; i++) {
+        const sample = [];
+        let sampleValidValues = 0;
+        
+        for (let j = 1; j <= userSampleConfig.sampleSize; j++) {
+            const inputId = `sample-${i}-${j}`;
+            const input = document.getElementById(inputId);
+            
+            if (input) {
+                const value = parseFloat(input.value);
+                if (!isNaN(value)) {
+                    sample.push(value);
+                    sampleValidValues++;
+                    totalValidValues++;
+                    input.classList.remove('invalid');
+                    input.classList.add('valid');
+                } else {
+                    sample.push(NaN);
+                    input.classList.remove('valid');
+                    input.classList.add('invalid');
+                }
+            } else {
+                sample.push(NaN);
+            }
+        }
+        
+        // Ajouter l'échantillon même s'il contient des NaN
+        samples.push(sample);
+        
+        // Afficher un warning si l'échantillon a moins de 2 valeurs valides
+        if (sampleValidValues < 2 && sampleValidValues > 0) {
+            console.warn(`Échantillon ${i} a seulement ${sampleValidValues} valeur(s) valide(s) - minimum recommandé: 2`);
+        }
+    }
+    
+    console.log(`${totalValidValues} valeurs valides récupérées sur ${userSampleConfig.sampleCount * userSampleConfig.sampleSize} possibles`);
+    return samples;
+}
+
+// Récupération des données brutes
+function getRawData() {
+    const rawDataString = document.getElementById('rawData').value;
+    const values = rawDataString.split(/[,\s]+/)
+        .map(val => parseFloat(val.trim()))
+        .filter(val => !isNaN(val));
+    
+    console.log(`${values.length} valeurs brutes récupérées`);
+    return values;
+}
+
+// Aplatir les échantillons en filtrant les NaN
+function flattenSamples(samples) {
+    const flattened = [];
+    samples.forEach(sample => {
+        sample.forEach(value => {
+            if (!isNaN(value)) {
+                flattened.push(value);
+            }
+        });
+    });
+    return flattened;
+}
+
+// Regroupement des données brutes en échantillons - CORRIGÉE
+function groupIntoSamples(data) {
+    if (data.length === 0) return [];
+    
+    // Pour les données brutes, on utilise la configuration par défaut ou on demande
+    const dataType = document.getElementById('dataType').value;
+    
+    if (dataType === 'raw') {
+        // Essayer d'utiliser la taille d'échantillon de la configuration utilisateur si disponible
+        let sampleSize = userSampleConfig.sampleSize || 5;
+        
+        // Demander confirmation à l'utilisateur
+        const userSize = prompt(
+            `Vous avez ${data.length} données brutes.\n` +
+            `Entrez la taille d'échantillon souhaitée (entre 2 et ${Math.min(25, data.length)}):`,
+            Math.min(sampleSize, Math.floor(data.length / 3))
+        );
+        
+        if (userSize !== null) {
+            sampleSize = Math.min(Math.max(parseInt(userSize), 2), Math.min(25, data.length));
+            userSampleConfig.sampleSize = sampleSize;
+        }
+        
+        const samples = [];
+        for (let i = 0; i < data.length; i += sampleSize) {
+            const sample = data.slice(i, i + sampleSize);
+            if (sample.length >= 2) { // On garde seulement les échantillons avec au moins 2 valeurs
+                samples.push(sample);
+            }
+        }
+        
+        userSampleConfig.sampleCount = samples.length;
+        console.log(`Données brutes regroupées en ${samples.length} échantillons de ${sampleSize} mesures`);
+        return samples;
+    }
+    
+    // Pour les données d'échantillons, on garde la structure originale
+    const samples = [];
+    dataSamples.forEach(sample => {
+        const validSample = sample.filter(v => !isNaN(v));
+        if (validSample.length >= 2) {
+            samples.push(validSample);
+        }
+    });
+    
+    return samples;
+}
+
+// Gestion du calcul - AJOUT DE VALIDATION
+async function handleCalculate() {
+    if (!validateInputs()) {
+        alert('Veuillez corriger les erreurs dans les champs de saisie.');
+        return;
+    }
+    
     // Afficher l'indicateur de chargement
     document.getElementById('loadingIndicator').style.display = 'block';
+    document.getElementById('calculateBtn').disabled = true;
     
-    // Simuler un délai de calcul
-    setTimeout(() => {
+    try {
         // Récupérer les données selon le type choisi
         const dataType = document.getElementById('dataType').value;
         
         if (dataType === 'sample') {
+            // Récupérer les échantillons saisis
             dataSamples = getSampleData();
             rawData = flattenSamples(dataSamples);
+            
+            // Vérifier qu'on a assez de données
+            if (rawData.length < 3) {
+                throw new Error(`Seulement ${rawData.length} valeur(s) valide(s). Minimum requis: 3 valeurs.`);
+            }
+            
+            // Garder la structure des échantillons (même avec des NaN)
+            const validSamples = dataSamples.map(sample => 
+                sample.filter(v => !isNaN(v))
+            ).filter(sample => sample.length >= 2);
+            
+            if (validSamples.length === 0) {
+                throw new Error('Aucun échantillon valide (minimum 2 valeurs par échantillon).');
+            }
+            
+            dataSamples = validSamples;
+            
         } else {
+            // Récupérer les données brutes
             rawData = getRawData();
+            
+            if (rawData.length < 3) {
+                throw new Error(`Seulement ${rawData.length} valeur(s) valide(s). Minimum requis: 3 valeurs.`);
+            }
+            
+            // Regrouper en échantillons
             dataSamples = groupIntoSamples(rawData);
-        }
-        
-        // Vérifier que nous avons des données
-        if (rawData.length === 0) {
-            alert('Veuillez saisir des données valides.');
-            document.getElementById('loadingIndicator').style.display = 'none';
-            return;
-        }
-        
-        // Calculer les statistiques
-        analysisResults = {
-            descriptive: calculateDescriptiveStats(rawData, dataSamples),
-            normality: performShapiroWilkTest(rawData),
-            capability: calculateCapabilityIndices(rawData, dataSamples),
-            controlCharts: calculateControlLimits(dataSamples)
-        };
-        
-        // Afficher les résultats
-        displayResults();
-        
-        // Masquer l'indicateur de chargement et afficher les résultats
-        document.getElementById('loadingIndicator').style.display = 'none';
-        document.getElementById('resultsSection').style.display = 'block';
-        document.getElementById('exportBtn').disabled = false;
-    }, 1000);
-}
-
-// Récupère les données d'échantillons
-function getSampleData() {
-    const sampleCount = parseInt(document.getElementById('sampleCount').value);
-    const sampleSize = parseInt(document.getElementById('sampleSize').value);
-    const samples = [];
-    
-    for (let i = 1; i <= sampleCount; i++) {
-        const sample = [];
-        for (let j = 1; j <= sampleSize; j++) {
-            const value = parseFloat(document.getElementById(`sample-${i}-${j}`).value);
-            if (!isNaN(value)) {
-                sample.push(value);
+            
+            if (dataSamples.length === 0) {
+                throw new Error('Impossible de créer des échantillons valides.');
             }
         }
-        if (sample.length > 0) {
-            samples.push(sample);
-        }
+        
+        // Calculs statistiques
+        analysisResults = await performAllCalculations(rawData, dataSamples);
+        
+        // Affichage des résultats
+        displayResults();
+        
+        // Afficher la section des résultats
+        document.getElementById('resultsSection').style.display = 'block';
+        document.getElementById('exportBtn').disabled = false;
+        
+    } catch (error) {
+        alert(`Erreur: ${error.message}`);
+        console.error('Erreur détaillée:', error);
+    } finally {
+        // Masquer l'indicateur de chargement
+        document.getElementById('loadingIndicator').style.display = 'none';
+        document.getElementById('calculateBtn').disabled = false;
     }
+}
+
+// Calculs statistiques principaux
+async function performAllCalculations(data, samples) {
+    const descriptive = calculateDescriptiveStats(data, samples);
+    const normality = performShapiroWilkTest(data);
+    const capability = calculateCapabilityIndices(data, samples, descriptive);
+    const controlCharts = calculateControlLimits(samples, descriptive);
     
-    return samples;
+    return { descriptive, normality, capability, controlCharts };
 }
 
-// Récupère les données brutes
-function getRawData() {
-    const rawDataString = document.getElementById('rawData').value;
-    return rawDataString.split(',')
-        .map(val => parseFloat(val.trim()))
-        .filter(val => !isNaN(val));
-}
-
-// Aplatit les échantillons en une seule liste
-function flattenSamples(samples) {
-    return samples.reduce((acc, sample) => acc.concat(sample), []);
-}
-
-// Regroupe les données brutes en échantillons
-function groupIntoSamples(data) {
-    // Déterminer la taille d'échantillon optimale (environ 5)
-    const sampleSize = Math.min(5, Math.floor(data.length / 3));
-    if (sampleSize < 2) return [data]; // Si pas assez de données, un seul échantillon
-    
-    const samples = [];
-    for (let i = 0; i < data.length; i += sampleSize) {
-        samples.push(data.slice(i, i + sampleSize));
-    }
-    
-    return samples;
-}
-
-// Calcule les statistiques descriptives
+// Calcul des statistiques descriptives
 function calculateDescriptiveStats(data, samples) {
     const n = data.length;
+    
+    if (n < 2) {
+        throw new Error('Pas assez de données pour calculer les statistiques.');
+    }
+    
     const mean = data.reduce((sum, val) => sum + val, 0) / n;
+    
+    // Calcul de la variance
     const variance = data.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / (n - 1);
     const std = Math.sqrt(variance);
     
-    // Calcul des moyennes et étendues par échantillon
-    const sampleMeans = samples.map(sample => 
-        sample.reduce((sum, val) => sum + val, 0) / sample.length
-    );
+    // Statistiques par échantillon
+    const sampleStats = samples.map((sample, index) => {
+        const sampleMean = sample.reduce((s, v) => s + v, 0) / sample.length;
+        const sampleRange = Math.max(...sample) - Math.min(...sample);
+        const sampleStd = Math.sqrt(sample.reduce((s, v) => s + Math.pow(v - sampleMean, 2), 0) / (sample.length - 1));
+        return { 
+            mean: sampleMean, 
+            range: sampleRange,
+            std: sampleStd,
+            size: sample.length,
+            values: [...sample]
+        };
+    });
     
-    const sampleRanges = samples.map(sample => 
-        Math.max(...sample) - Math.min(...sample)
-    );
-    
-    const avgRange = sampleRanges.reduce((sum, range) => sum + range, 0) / samples.length;
+    const sampleMeans = sampleStats.map(s => s.mean);
+    const sampleRanges = sampleStats.map(s => s.range);
+    const avgRange = sampleRanges.reduce((sum, r) => sum + r, 0) / samples.length;
     
     return {
         n,
@@ -242,38 +453,47 @@ function calculateDescriptiveStats(data, samples) {
         variance,
         std,
         sampleCount: samples.length,
-        sampleSize: samples[0] ? samples[0].length : 0,
+        sampleSize: samples.length > 0 ? samples[0].length : 0,
         sampleMeans,
         sampleRanges,
         avgRange,
         min: Math.min(...data),
         max: Math.max(...data),
         range: Math.max(...data) - Math.min(...data),
-        data: data
+        data: [...data],
+        sampleStats: sampleStats
     };
 }
 
-// Effectue le test de Shapiro-Wilk
+// Test de Shapiro-Wilk amélioré
 function performShapiroWilkTest(data) {
-    // Implémentation simplifiée du test de Shapiro-Wilk
-    // En pratique, on utiliserait une bibliothèque statistique complète
-    
     const n = data.length;
-    if (n < 3 || n > 50) {
+    
+    if (n < 3) {
         return {
             w: 0,
             criticalValue: 0,
+            pValue: 0,
             isNormal: false,
-            message: "Le test de Shapiro-Wilk nécessite entre 3 et 50 données."
+            message: "Minimum 3 données requises pour le test de Shapiro-Wilk."
+        };
+    }
+    
+    if (n > 50) {
+        return {
+            w: 0,
+            criticalValue: 0,
+            pValue: 0,
+            isNormal: false,
+            message: "Maximum 50 données pour le test de Shapiro-Wilk."
         };
     }
     
     // Données triées
     const sortedData = [...data].sort((a, b) => a - b);
     
-    // Coefficients pour le test (valeurs approximatives)
-    // En pratique, on utiliserait une table complète
-    const coefficients = getShapiroCoefficients(n);
+    // Coefficients
+    const coefficients = SHAPIRO_COEFFICIENTS[n] || Array(Math.floor(n/2)).fill(0.5);
     
     // Calcul de la statistique W
     let numerator = 0;
@@ -281,83 +501,71 @@ function performShapiroWilkTest(data) {
         numerator += coefficients[i] * (sortedData[n-1-i] - sortedData[i]);
     }
     
-    const denominator = data.reduce((sum, val) => {
-        const diff = val - data.reduce((s, v) => s + v, 0) / n;
-        return sum + diff * diff;
-    }, 0);
+    const mean = sortedData.reduce((s, v) => s + v, 0) / n;
+    const denominator = sortedData.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0);
     
     const w = Math.pow(numerator, 2) / denominator;
     
-    // Valeur critique pour alpha = 0.05 (approximative)
-    const criticalValue = getCriticalValue(n);
+    // Valeur critique et p-value approximative
+    const criticalValue = getShapiroCriticalValue(n);
+    const pValue = estimatePValue(w, n);
+    
+    const isNormal = w > criticalValue;
     
     return {
-        w: Math.round(w * 1000) / 1000,
-        criticalValue: Math.round(criticalValue * 1000) / 1000,
-        isNormal: w > criticalValue,
-        message: w > criticalValue ? 
+        w: Math.round(w * 10000) / 10000,
+        criticalValue: Math.round(criticalValue * 10000) / 10000,
+        pValue: Math.round(pValue * 10000) / 10000,
+        isNormal,
+        message: isNormal ? 
             "La distribution est normale (au seuil de 5%)" : 
             "La distribution n'est pas normale (au seuil de 5%)"
     };
 }
 
-// Coefficients approximatifs pour Shapiro-Wilk
-function getShapiroCoefficients(n) {
-    // Table simplifiée - en pratique, on utiliserait une table complète
-    const coefficients = {
-        3: [0.7071],
-        4: [0.6872, 0.1677],
-        5: [0.6646, 0.2413],
-        6: [0.6431, 0.2806, 0.0875],
-        7: [0.6233, 0.3031, 0.1401],
-        8: [0.6052, 0.3164, 0.1743, 0.0561],
-        9: [0.5888, 0.3244, 0.1976, 0.0947],
-        10: [0.5739, 0.3291, 0.2141, 0.1224, 0.0399]
-    };
+// Obtention de la valeur critique Shapiro-Wilk
+function getShapiroCriticalValue(n) {
+    const keys = Object.keys(SHAPIRO_CRITICAL_VALUES).map(Number).sort((a, b) => a - b);
     
-    return coefficients[n] || Array(Math.floor(n/2)).fill(0.5);
-}
-
-// Valeur critique approximative pour Shapiro-Wilk
-function getCriticalValue(n) {
-    // Valeurs critiques approximatives pour alpha = 0.05
-    const criticalValues = {
-        3: 0.767, 4: 0.748, 5: 0.762, 6: 0.788, 7: 0.803,
-        8: 0.818, 9: 0.829, 10: 0.842, 15: 0.881, 20: 0.905,
-        25: 0.918, 30: 0.927, 40: 0.941, 50: 0.947
-    };
+    if (n <= keys[0]) return SHAPIRO_CRITICAL_VALUES[keys[0]];
+    if (n >= keys[keys.length - 1]) return SHAPIRO_CRITICAL_VALUES[keys[keys.length - 1]];
     
-    // Approximation linéaire pour n entre les valeurs connues
-    const knownN = Object.keys(criticalValues).map(Number).sort((a, b) => a - b);
-    if (n <= knownN[0]) return criticalValues[knownN[0]];
-    if (n >= knownN[knownN.length-1]) return criticalValues[knownN[knownN.length-1]];
-    
-    for (let i = 0; i < knownN.length - 1; i++) {
-        if (n >= knownN[i] && n <= knownN[i+1]) {
-            const t = (n - knownN[i]) / (knownN[i+1] - knownN[i]);
-            return criticalValues[knownN[i]] + t * (criticalValues[knownN[i+1]] - criticalValues[knownN[i]]);
+    // Interpolation linéaire
+    for (let i = 0; i < keys.length - 1; i++) {
+        if (n >= keys[i] && n <= keys[i+1]) {
+            const t = (n - keys[i]) / (keys[i+1] - keys[i]);
+            return SHAPIRO_CRITICAL_VALUES[keys[i]] + 
+                   t * (SHAPIRO_CRITICAL_VALUES[keys[i+1]] - SHAPIRO_CRITICAL_VALUES[keys[i]]);
         }
     }
     
-    return 0.9; // Valeur par défaut
+    return 0.9;
 }
 
-// Calcule les indices de capabilité
-function calculateCapabilityIndices(data, samples) {
+// Estimation de la p-value
+function estimatePValue(w, n) {
+    // Approximation simple de la p-value
+    const transformed = Math.log(1 - w);
+    const mu = -1.2725 + 1.0521 * Math.log(n);
+    const sigma = 0.8038 - 0.3167 * Math.log(n) + 0.0411 * Math.pow(Math.log(n), 2);
+    
+    const z = (transformed - mu) / sigma;
+    return 1 - Math.exp(-Math.exp(z));
+}
+
+// Calcul des indices de capabilité
+function calculateCapabilityIndices(data, samples, descriptive) {
     const ts = parseFloat(document.getElementById('ts').value);
     const ti = parseFloat(document.getElementById('ti').value);
     const nqa = parseFloat(document.getElementById('nqa').value);
     
-    const mean = data.reduce((sum, val) => sum + val, 0) / data.length;
-    const std = Math.sqrt(data.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / (data.length - 1));
+    const mean = descriptive.mean;
+    const std = descriptive.std;
+    const avgRange = descriptive.avgRange;
+    const sampleSize = descriptive.sampleSize;
     
-    // Calcul de sigma_i à partir de l'étendue moyenne
-    const sampleRanges = samples.map(sample => Math.max(...sample) - Math.min(...sample));
-    const avgRange = sampleRanges.reduce((sum, range) => sum + range, 0) / samples.length;
-    
-    // Constante d2 selon la taille d'échantillon
-    const sampleSize = samples[0] ? samples[0].length : 0;
-    const d2 = getD2Constant(sampleSize);
+    // Calcul de sigma_i
+    const d2 = D2_VALUES[sampleSize] || 1.0;
     const sigma_i = avgRange / d2;
     
     // Indices de capabilité
@@ -373,51 +581,66 @@ function calculateCapabilityIndices(data, samples) {
         (mean - ti) / (3 * sigma_i)
     );
     
+    // Estimation du % hors tolérance
+    const zLower = (ti - mean) / std;
+    const zUpper = (ts - mean) / std;
+    const pLower = 0.5 * (1 + erf(zLower / Math.sqrt(2)));
+    const pUpper = 0.5 * (1 + erf(zUpper / Math.sqrt(2)));
+    const outOfTolerance = (pLower + (1 - pUpper)) * 100;
+    
     return {
-        cp: Math.round(cp * 1000) / 1000,
-        cpk: Math.round(cpk * 1000) / 1000,
-        cm: Math.round(cm * 1000) / 1000,
-        cmk: Math.round(cmk * 1000) / 1000,
+        cp: Math.max(0, Math.round(cp * 1000) / 1000),
+        cpk: Math.max(0, Math.round(cpk * 1000) / 1000),
+        cm: Math.max(0, Math.round(cm * 1000) / 1000),
+        cmk: Math.max(0, Math.round(cmk * 1000) / 1000),
         ts,
         ti,
         nqa,
-        sigma_i: Math.round(sigma_i * 1000) / 1000
+        sigma_i: Math.round(sigma_i * 1000) / 1000,
+        d2,
+        toleranceRange: (ts - ti).toFixed(4),
+        outOfTolerance: Math.round(outOfTolerance * 1000) / 1000
     };
 }
 
-// Constante d2 pour le calcul de sigma_i
-function getD2Constant(sampleSize) {
-    const d2Values = {
-        2: 1.128, 3: 1.693, 4: 2.059, 5: 2.326,
-        6: 2.534, 7: 2.704, 8: 2.847, 9: 2.970, 10: 3.078
-    };
-    return d2Values[sampleSize] || 1.0;
+// Fonction d'erreur pour le calcul statistique
+function erf(x) {
+    // Approximation de la fonction d'erreur
+    const sign = (x >= 0) ? 1 : -1;
+    x = Math.abs(x);
+    
+    const a1 = 0.254829592;
+    const a2 = -0.284496736;
+    const a3 = 1.421413741;
+    const a4 = -1.453152027;
+    const a5 = 1.061405429;
+    const p = 0.3275911;
+    
+    const t = 1.0 / (1.0 + p * x);
+    const y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
+    
+    return sign * y;
 }
 
-// Calcule les limites de contrôle
-function calculateControlLimits(samples) {
-    const sampleMeans = samples.map(sample => 
-        sample.reduce((sum, val) => sum + val, 0) / sample.length
-    );
+// Calcul des limites de contrôle
+function calculateControlLimits(samples, descriptive) {
+    const sampleMeans = descriptive.sampleMeans;
+    const sampleRanges = descriptive.sampleRanges;
+    const overallMean = descriptive.mean;
+    const avgRange = descriptive.avgRange;
+    const sampleSize = descriptive.sampleSize;
     
-    const sampleRanges = samples.map(sample => 
-        Math.max(...sample) - Math.min(...sample)
-    );
+    // Constantes
+    const a2 = A2_VALUES[sampleSize] || 0.0;
+    const d3 = D3_VALUES[sampleSize] || 0.0;
+    const d4 = D4_VALUES[sampleSize] || 0.0;
+    const d2 = D2_VALUES[sampleSize] || 1.0;
     
-    const overallMean = sampleMeans.reduce((sum, mean) => sum + mean, 0) / samples.length;
-    const avgRange = sampleRanges.reduce((sum, range) => sum + range, 0) / samples.length;
-    
-    // Constantes pour les cartes de contrôle
-    const sampleSize = samples[0] ? samples[0].length : 0;
-    const a2 = getA2Constant(sampleSize);
-    const d3 = getD3Constant(sampleSize);
-    const d4 = getD4Constant(sampleSize);
-    
-    // Limites pour la carte X-bar
+    // Limites X-bar
     const xbarUCL = overallMean + a2 * avgRange;
     const xbarLCL = overallMean - a2 * avgRange;
     
-    // Limites pour la carte R
+    // Limites R
     const rUCL = d4 * avgRange;
     const rLCL = d3 * avgRange;
     
@@ -425,48 +648,22 @@ function calculateControlLimits(samples) {
         xbar: {
             means: sampleMeans,
             ucl: xbarUCL,
-            lcl: xbarLCL,
+            lcl: Math.max(0, xbarLCL),
             center: overallMean
         },
         r: {
             ranges: sampleRanges,
             ucl: rUCL,
-            lcl: rLCL,
+            lcl: Math.max(0, rLCL),
             center: avgRange
         },
-        constants: { a2, d3, d4 }
+        constants: { a2, d3, d4, d2 }
     };
 }
 
-// Constante A2 pour les cartes de contrôle
-function getA2Constant(sampleSize) {
-    const a2Values = {
-        2: 1.880, 3: 1.023, 4: 0.729, 5: 0.577,
-        6: 0.483, 7: 0.419, 8: 0.373, 9: 0.337, 10: 0.308
-    };
-    return a2Values[sampleSize] || 0.0;
-}
-
-// Constante D3 pour les cartes de contrôle
-function getD3Constant(sampleSize) {
-    const d3Values = {
-        2: 0, 3: 0, 4: 0, 5: 0,
-        6: 0, 7: 0.076, 8: 0.136, 9: 0.184, 10: 0.223
-    };
-    return d3Values[sampleSize] || 0.0;
-}
-
-// Constante D4 pour les cartes de contrôle
-function getD4Constant(sampleSize) {
-    const d4Values = {
-        2: 3.267, 3: 2.574, 4: 2.282, 5: 2.114,
-        6: 2.004, 7: 1.924, 8: 1.864, 9: 1.816, 10: 1.777
-    };
-    return d4Values[sampleSize] || 0.0;
-}
-
-// Affiche tous les résultats
+// Affichage des résultats
 function displayResults() {
+    displayConfiguration();
     displaySummary();
     displayDescriptiveStats();
     displayNormalityTest();
@@ -474,565 +671,689 @@ function displayResults() {
     displayControlCharts();
 }
 
-// Affiche le résumé
+// Affichage de la configuration - NOUVELLE FONCTION
+function displayConfiguration() {
+    const configInfo = document.getElementById('configInfo');
+    const dataType = document.getElementById('dataType').value;
+    
+    let configHTML = '<p><strong>Configuration de l\'analyse :</strong></p>';
+    
+    if (dataType === 'sample') {
+        configHTML += `
+            <p>• Mode : Saisie par échantillons</p>
+            <p>• Configuration demandée : ${userSampleConfig.sampleCount} échantillons × ${userSampleConfig.sampleSize} mesures</p>
+            <p>• Configuration effective : ${analysisResults.descriptive.sampleCount} échantillons × ${analysisResults.descriptive.sampleSize} mesures</p>
+            <p>• Données totales analysées : ${analysisResults.descriptive.n} valeurs</p>
+        `;
+    } else {
+        configHTML += `
+            <p>• Mode : Données brutes</p>
+            <p>• Données fournies : ${rawData.length} valeurs</p>
+            <p>• Configuration effective : ${analysisResults.descriptive.sampleCount} échantillons × ${analysisResults.descriptive.sampleSize} mesures</p>
+            <p>• Données totales analysées : ${analysisResults.descriptive.n} valeurs</p>
+        `;
+    }
+    
+    configInfo.innerHTML = configHTML;
+}
+
+// Affichage du résumé
 function displaySummary() {
-    document.getElementById('meanValue').textContent = analysisResults.descriptive.mean.toFixed(4);
-    document.getElementById('stdValue').textContent = analysisResults.descriptive.std.toFixed(4);
-    document.getElementById('cpValue').textContent = analysisResults.capability.cp;
-    document.getElementById('cpkValue').textContent = analysisResults.capability.cpk;
+    const { descriptive, capability, normality } = analysisResults;
+    
+    document.getElementById('meanValue').textContent = descriptive.mean.toFixed(4);
+    document.getElementById('stdValue').textContent = descriptive.std.toFixed(4);
+    document.getElementById('cpValue').textContent = capability.cp;
+    document.getElementById('cpkValue').textContent = capability.cpk;
     
     // Conclusion générale
     const conclusionEl = document.getElementById('conclusion');
     let conclusionClass = 'conclusion';
     let conclusionText = '';
+    let statusIcon = '';
     
-    if (analysisResults.normality.isNormal && analysisResults.capability.cpk >= 1.33) {
+    if (normality.isNormal && capability.cpk >= 1.33) {
         conclusionClass += ' success';
-        conclusionText = '✅ Le procédé est sous contrôle statistique et capable. La distribution est normale et les indices de capabilité sont satisfaisants.';
-    } else if (analysisResults.normality.isNormal && analysisResults.capability.cpk >= 1.0) {
+        statusIcon = '<span class="status-indicator status-good"></span>';
+        conclusionText = 'Le procédé est sous contrôle statistique et capable. La distribution est normale et les indices de capabilité sont satisfaisants.';
+    } else if (normality.isNormal && capability.cpk >= 1.0) {
         conclusionClass += ' warning';
-        conclusionText = '⚠️ Le procédé est sous contrôle mais nécessite une surveillance. La distribution est normale mais la capabilité est marginale.';
+        statusIcon = '<span class="status-indicator status-warning"></span>';
+        conclusionText = 'Le procédé est sous contrôle mais nécessite une surveillance. La distribution est normale mais la capabilité est marginale.';
     } else {
         conclusionClass += ' error';
-        conclusionText = '❌ Le procédé nécessite des actions correctives. Vérifiez la normalité de la distribution et/ou la capabilité du procédé.';
+        statusIcon = '<span class="status-indicator status-error"></span>';
+        conclusionText = 'Le procédé nécessite des actions correctives. Vérifiez la normalité de la distribution et/ou la capabilité du procédé.';
     }
     
     conclusionEl.className = conclusionClass;
-    conclusionEl.innerHTML = `<h3>Conclusion</h3><p>${conclusionText}</p>`;
+    conclusionEl.innerHTML = `<h3>${statusIcon} Conclusion</h3><p>${conclusionText}</p>`;
 }
 
-// Affiche les statistiques descriptives
+// Affichage des statistiques descriptives - CORRIGÉE
 function displayDescriptiveStats() {
-    document.getElementById('sampleCount').textContent = analysisResults.descriptive.sampleCount;
-    document.getElementById('sampleSize').textContent = analysisResults.descriptive.sampleSize;
-    document.getElementById('globalMean').textContent = analysisResults.descriptive.mean.toFixed(4);
-    document.getElementById('globalStd').textContent = analysisResults.descriptive.std.toFixed(4);
-    document.getElementById('avgRange').textContent = analysisResults.descriptive.avgRange.toFixed(4);
-    document.getElementById('variance').textContent = analysisResults.descriptive.variance.toFixed(6);
+    const { descriptive } = analysisResults;
     
-    // Afficher les données brutes
+    document.getElementById('totalData').textContent = descriptive.n;
+    document.getElementById('sampleCount').textContent = descriptive.sampleCount;
+    document.getElementById('sampleSize').textContent = descriptive.sampleSize;
+    document.getElementById('globalMean').textContent = descriptive.mean.toFixed(4);
+    document.getElementById('globalStd').textContent = descriptive.std.toFixed(4);
+    document.getElementById('avgRange').textContent = descriptive.avgRange.toFixed(4);
+    document.getElementById('variance').textContent = descriptive.variance.toFixed(6);
+    document.getElementById('minValue').textContent = descriptive.min.toFixed(4);
+    document.getElementById('maxValue').textContent = descriptive.max.toFixed(4);
+    document.getElementById('totalRange').textContent = descriptive.range.toFixed(4);
+    
+    // Affichage des données brutes
     const rawDataTable = document.getElementById('rawDataTable');
-    let tableHTML = '<tr><th>Index</th><th>Valeur</th></tr>';
+    let tableHTML = '<thead><tr><th>Index</th><th>Valeur</th><th>Échantillon</th><th>Mesure</th></tr></thead><tbody>';
     
-    analysisResults.descriptive.data.forEach((value, index) => {
-        tableHTML += `<tr><td>${index + 1}</td><td>${value.toFixed(4)}</td></tr>`;
+    let sampleIndex = 1;
+    let measureIndex = 1;
+    
+    descriptive.data.forEach((value, index) => {
+        tableHTML += `<tr>
+            <td>${index + 1}</td>
+            <td>${value.toFixed(4)}</td>
+            <td>Échantillon ${sampleIndex}</td>
+            <td>Mesure ${measureIndex}</td>
+        </tr>`;
+        
+        measureIndex++;
+        if (measureIndex > descriptive.sampleSize) {
+            measureIndex = 1;
+            sampleIndex++;
+        }
     });
     
+    tableHTML += '</tbody>';
     rawDataTable.innerHTML = tableHTML;
+    
+    // Affichage des statistiques par échantillon
+    const sampleStatsTable = document.getElementById('sampleStatsTable');
+    let statsHTML = '<thead><tr><th>Échantillon</th><th>Taille</th><th>Moyenne</th><th>Étendue</th><th>Écart-type</th><th>Min</th><th>Max</th></tr></thead><tbody>';
+    
+    descriptive.sampleStats.forEach((stats, index) => {
+        statsHTML += `<tr>
+            <td>${index + 1}</td>
+            <td>${stats.size}</td>
+            <td>${stats.mean.toFixed(4)}</td>
+            <td>${stats.range.toFixed(4)}</td>
+            <td>${stats.std.toFixed(4)}</td>
+            <td>${Math.min(...stats.values).toFixed(4)}</td>
+            <td>${Math.max(...stats.values).toFixed(4)}</td>
+        </tr>`;
+    });
+    
+    statsHTML += '</tbody>';
+    sampleStatsTable.innerHTML = statsHTML;
 }
 
-// Affiche les résultats du test de normalité
+// Affichage du test de normalité
 function displayNormalityTest() {
-    document.getElementById('shapiroW').textContent = analysisResults.normality.w;
-    document.getElementById('criticalValue').textContent = analysisResults.normality.criticalValue;
-    document.getElementById('normalityConclusion').textContent = analysisResults.normality.message;
+    const { normality } = analysisResults;
     
-    // Interprétation de W
+    document.getElementById('shapiroW').textContent = normality.w;
+    document.getElementById('criticalValue').textContent = normality.criticalValue;
+    document.getElementById('pValue').textContent = normality.pValue;
+    document.getElementById('normalityConclusion').textContent = normality.message;
+    
+    // Interprétation
     const wIntEl = document.getElementById('shapiroWInt');
-    if (analysisResults.normality.w > analysisResults.normality.criticalValue) {
-        wIntEl.textContent = 'W > Wcrit → Distribution normale';
-        wIntEl.style.color = 'green';
+    const pIntEl = document.getElementById('pValueInt');
+    
+    if (normality.isNormal) {
+        wIntEl.textContent = 'Distribution normale';
+        wIntEl.style.color = 'var(--success)';
+        pIntEl.textContent = 'Non significatif (p > 0.05)';
+        pIntEl.style.color = 'var(--success)';
     } else {
-        wIntEl.textContent = 'W ≤ Wcrit → Distribution non normale';
-        wIntEl.style.color = 'red';
+        wIntEl.textContent = 'Distribution non normale';
+        wIntEl.style.color = 'var(--accent)';
+        pIntEl.textContent = 'Significatif (p ≤ 0.05)';
+        pIntEl.style.color = 'var(--accent)';
     }
     
-    // Graphique de normalité
     createNormalityChart();
 }
 
-// Affiche l'analyse de capabilité
+// Affichage de l'analyse de capabilité
 function displayCapabilityAnalysis() {
-    document.getElementById('cpResult').textContent = analysisResults.capability.cp;
-    document.getElementById('cpkResult').textContent = analysisResults.capability.cpk;
-    document.getElementById('cmResult').textContent = analysisResults.capability.cm;
-    document.getElementById('cmkResult').textContent = analysisResults.capability.cmk;
+    const { capability } = analysisResults;
+    
+    document.getElementById('cpResult').textContent = capability.cp;
+    document.getElementById('cpkResult').textContent = capability.cpk;
+    document.getElementById('cmResult').textContent = capability.cm;
+    document.getElementById('cmkResult').textContent = capability.cmk;
+    document.getElementById('sigmaIValue').textContent = capability.sigma_i;
+    document.getElementById('toleranceRange').textContent = capability.toleranceRange;
+    document.getElementById('outOfTolerance').textContent = capability.outOfTolerance + '%';
+    document.getElementById('d2Value').textContent = capability.d2;
     
     // Interprétations
-    document.getElementById('cpInterpretation').textContent = interpretCp(analysisResults.capability.cp);
-    document.getElementById('cpkInterpretation').textContent = interpretCpk(analysisResults.capability.cpk);
-    document.getElementById('cmInterpretation').textContent = interpretCp(analysisResults.capability.cm);
-    document.getElementById('cmkInterpretation').textContent = interpretCpk(analysisResults.capability.cmk);
+    document.getElementById('cpInterpretation').textContent = interpretCp(capability.cp);
+    document.getElementById('cpkInterpretation').textContent = interpretCpk(capability.cpk);
+    document.getElementById('cmInterpretation').textContent = interpretCp(capability.cm);
+    document.getElementById('cmkInterpretation').textContent = interpretCpk(capability.cmk);
     
-    // Graphique de capabilité
     createCapabilityChart();
 }
 
-// Interprète la valeur de Cp
+// Interprétation Cp
 function interpretCp(cp) {
-    if (cp >= 1.67) return 'Très capable';
-    if (cp >= 1.33) return 'Capable';
+    if (cp >= 1.67) return 'Très capable (niveau 1+)';
+    if (cp >= 1.33) return 'Capable (niveau 1)';
     if (cp >= 1.0) return 'Capable marginalement';
-    return 'Non capable';
+    if (cp >= 0.67) return 'Non capable';
+    return 'Très non capable';
 }
 
-// Interprète la valeur de Cpk
+// Interprétation Cpk
 function interpretCpk(cpk) {
     if (cpk >= 1.67) return 'Procédé centré et très capable';
-    if (cpk >= 1.33) return 'Procédé capable';
+    if (cpk >= 1.33) return 'Procédé capable et bien centré';
     if (cpk >= 1.0) return 'Procédé capable marginalement';
-    return 'Procédé non capable ou non centré';
+    if (cpk >= 0.67) return 'Procédé non capable';
+    return 'Procédé très non capable ou non centré';
 }
 
-// Affiche les cartes de contrôle
+// Affichage des cartes de contrôle
 function displayControlCharts() {
-    document.getElementById('xbarUcl').textContent = analysisResults.controlCharts.xbar.ucl.toFixed(4);
-    document.getElementById('xbarCenter').textContent = analysisResults.controlCharts.xbar.center.toFixed(4);
-    document.getElementById('xbarLcl').textContent = analysisResults.controlCharts.xbar.lcl.toFixed(4);
-    document.getElementById('rUcl').textContent = analysisResults.controlCharts.r.ucl.toFixed(4);
-    document.getElementById('rCenter').textContent = analysisResults.controlCharts.r.center.toFixed(4);
-    document.getElementById('rLcl').textContent = analysisResults.controlCharts.r.lcl.toFixed(4);
+    const { controlCharts } = analysisResults;
+    
+    document.getElementById('xbarUcl').textContent = controlCharts.xbar.ucl.toFixed(4);
+    document.getElementById('xbarCenter').textContent = controlCharts.xbar.center.toFixed(4);
+    document.getElementById('xbarLcl').textContent = controlCharts.xbar.lcl.toFixed(4);
+    document.getElementById('rUcl').textContent = controlCharts.r.ucl.toFixed(4);
+    document.getElementById('rCenter').textContent = controlCharts.r.center.toFixed(4);
+    document.getElementById('rLcl').textContent = controlCharts.r.lcl.toFixed(4);
+    document.getElementById('a2Value').textContent = controlCharts.constants.a2;
+    document.getElementById('d3Value').textContent = controlCharts.constants.d3;
+    document.getElementById('d4Value').textContent = controlCharts.constants.d4;
+    document.getElementById('d2Value').textContent = controlCharts.constants.d2;
     
     createXbarChart();
     createRChart();
 }
 
-// Crée le graphique de normalité
+// Création des graphiques
 function createNormalityChart() {
-    const ctx = document.getElementById('normalityChart').getContext('2d');
+    const ctx = document.getElementById('normalityChart');
+    if (!ctx) return;
     
-    // Détruire le graphique existant
-    if (charts.normality) charts.normality.destroy();
-    
-    // Données pour l'histogramme
-    const data = rawData;
-    const min = Math.min(...data);
-    const max = Math.max(...data);
-    const range = max - min;
-    const binCount = Math.min(10, Math.ceil(Math.sqrt(data.length)));
-    const binSize = range / binCount;
-    
-    // Calcul des fréquences
-    const bins = Array(binCount).fill(0);
-    data.forEach(value => {
-        const binIndex = Math.min(Math.floor((value - min) / binSize), binCount - 1);
-        bins[binIndex]++;
-    });
-    
-    // Courbe normale théorique
-    const mean = analysisResults.descriptive.mean;
-    const std = analysisResults.descriptive.std;
-    const normalCurve = [];
-    const step = range / 50;
-    for (let x = min - range * 0.1; x <= max + range * 0.1; x += step) {
-        const y = (1 / (std * Math.sqrt(2 * Math.PI))) * 
-                 Math.exp(-0.5 * Math.pow((x - mean) / std, 2));
-        normalCurve.push({x, y: y * data.length * binSize});
+    // Détruire l'ancien graphique
+    if (charts.normality) {
+        charts.normality.destroy();
     }
     
-    charts.normality = new Chart(ctx, {
+    const { descriptive } = analysisResults;
+    const data = descriptive.data;
+    
+    // Calcul de l'histogramme
+    const histogram = calculateHistogram(data);
+    
+    charts.normality = new Chart(ctx.getContext('2d'), {
         type: 'bar',
         data: {
-            labels: Array.from({length: binCount}, (_, i) => 
-                (min + i * binSize).toFixed(2) + ' - ' + (min + (i+1) * binSize).toFixed(2)
-            ),
-            datasets: [
-                {
-                    label: 'Distribution observée',
-                    data: bins,
-                    backgroundColor: 'rgba(52, 152, 219, 0.7)',
-                    borderColor: 'rgba(52, 152, 219, 1)',
-                    borderWidth: 1
-                },
-                {
-                    label: 'Distribution normale théorique',
-                    data: normalCurve.map(point => point.y),
-                    type: 'line',
-                    borderColor: 'rgba(231, 76, 60, 1)',
-                    borderWidth: 2,
-                    fill: false,
-                    pointRadius: 0
-                }
-            ]
+            labels: histogram.labels,
+            datasets: [{
+                label: 'Distribution observée',
+                data: histogram.values,
+                backgroundColor: 'rgba(52, 152, 219, 0.7)',
+                borderColor: 'rgba(52, 152, 219, 1)',
+                borderWidth: 1
+            }, {
+                label: 'Courbe normale théorique',
+                data: histogram.normalCurve,
+                type: 'line',
+                borderColor: 'rgba(231, 76, 60, 1)',
+                borderWidth: 2,
+                fill: false,
+                pointRadius: 0,
+                tension: 0.4
+            }]
         },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    title: {
-                        display: true,
-                        text: 'Fréquence'
-                    }
-                },
-                x: {
-                    title: {
-                        display: true,
-                        text: 'Valeurs'
-                    }
-                }
-            },
-            plugins: {
-                title: {
-                    display: true,
-                    text: 'Test de Normalité - Histogramme vs Courbe Normale'
-                },
-                legend: {
-                    position: 'top'
-                }
-            }
-        }
+        options: getChartOptions('Histogramme de Normalité', 'Valeurs', 'Fréquence')
     });
 }
 
-// Crée le graphique de capabilité
 function createCapabilityChart() {
-    const ctx = document.getElementById('capabilityChart').getContext('2d');
-    const ts = analysisResults.capability.ts;
-    const ti = analysisResults.capability.ti;
-    const mean = analysisResults.descriptive.mean;
-    const std = analysisResults.descriptive.std;
+    const ctx = document.getElementById('capabilityChart');
+    if (!ctx) return;
     
-    // Détruire le graphique existant
-    if (charts.capability) charts.capability.destroy();
-    
-    // Données pour la courbe normale
-    const curveData = [];
-    const range = ts - ti;
-    const step = range / 100;
-    
-    for (let x = ti - range * 0.2; x <= ts + range * 0.2; x += step) {
-        const y = (1 / (std * Math.sqrt(2 * Math.PI))) * 
-                 Math.exp(-0.5 * Math.pow((x - mean) / std, 2));
-        curveData.push({x, y});
+    if (charts.capability) {
+        charts.capability.destroy();
     }
     
-    charts.capability = new Chart(ctx, {
+    const { descriptive, capability } = analysisResults;
+    
+    // Données pour la courbe normale
+    const curveData = generateNormalCurve(
+        descriptive.mean, 
+        descriptive.std, 
+        capability.ti, 
+        capability.ts
+    );
+    
+    charts.capability = new Chart(ctx.getContext('2d'), {
         type: 'line',
         data: {
-            datasets: [
-                {
-                    label: 'Distribution du procédé',
-                    data: curveData.map(point => ({x: point.x, y: point.y * 100})),
-                    borderColor: 'rgba(52, 152, 219, 1)',
-                    borderWidth: 2,
-                    fill: false,
-                    tension: 0.4
-                }
-            ]
+            datasets: [{
+                label: 'Distribution du procédé',
+                data: curveData,
+                borderColor: 'rgba(52, 152, 219, 1)',
+                borderWidth: 2,
+                fill: true,
+                backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                tension: 0.4
+            }]
         },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                x: {
-                    type: 'linear',
-                    position: 'bottom',
-                    min: ti - range * 0.2,
-                    max: ts + range * 0.2,
-                    title: {
-                        display: true,
-                        text: 'Valeurs'
-                    },
-                    ticks: {
-                        callback: function(value) {
-                            return value.toFixed(2);
-                        }
-                    }
-                },
-                y: {
-                    title: {
-                        display: true,
-                        text: 'Densité de probabilité (%)'
-                    }
-                }
-            },
-            plugins: {
-                title: {
-                    display: true,
-                    text: 'Analyse de Capabilité - Distribution vs Spécifications'
-                },
-                annotation: {
-                    annotations: {
-                        line1: {
-                            type: 'line',
-                            xMin: ti,
-                            xMax: ti,
-                            borderColor: 'rgba(231, 76, 60, 1)',
-                            borderWidth: 2,
-                            label: {
-                                display: true,
-                                content: 'TI',
-                                position: 'start'
-                            }
-                        },
-                        line2: {
-                            type: 'line',
-                            xMin: ts,
-                            xMax: ts,
-                            borderColor: 'rgba(231, 76, 60, 1)',
-                            borderWidth: 2,
-                            label: {
-                                display: true,
-                                content: 'TS',
-                                position: 'start'
-                            }
-                        },
-                        line3: {
-                            type: 'line',
-                            xMin: mean,
-                            xMax: mean,
-                            borderColor: 'rgba(46, 204, 113, 1)',
-                            borderWidth: 2,
-                            label: {
-                                display: true,
-                                content: 'Moyenne',
-                                position: 'end'
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        options: getCapabilityChartOptions(capability.ti, capability.ts, descriptive.mean)
     });
 }
 
-// Crée la carte de contrôle X-bar
 function createXbarChart() {
-    const ctx = document.getElementById('xbarChart').getContext('2d');
-    const xbarData = analysisResults.controlCharts.xbar;
+    const ctx = document.getElementById('xbarChart');
+    if (!ctx) return;
     
-    // Détruire le graphique existant
-    if (charts.xbar) charts.xbar.destroy();
+    if (charts.xbar) {
+        charts.xbar.destroy();
+    }
     
-    charts.xbar = new Chart(ctx, {
+    const { controlCharts } = analysisResults;
+    const sampleCount = controlCharts.xbar.means.length;
+    
+    charts.xbar = new Chart(ctx.getContext('2d'), {
         type: 'line',
         data: {
-            labels: xbarData.means.map((_, i) => `Éch. ${i+1}`),
+            labels: Array.from({length: sampleCount}, (_, i) => `Éch. ${i+1}`),
             datasets: [
                 {
-                    label: 'Moyennes des échantillons',
-                    data: xbarData.means,
+                    label: 'Moyennes',
+                    data: controlCharts.xbar.means,
                     borderColor: 'rgba(52, 152, 219, 1)',
                     backgroundColor: 'rgba(52, 152, 219, 0.1)',
                     borderWidth: 2,
                     fill: false,
                     tension: 0.1
                 },
-                {
-                    label: 'LSC',
-                    data: Array(xbarData.means.length).fill(xbarData.ucl),
-                    borderColor: 'rgba(231, 76, 60, 1)',
-                    borderWidth: 1,
-                    borderDash: [5, 5],
-                    fill: false,
-                    pointRadius: 0
-                },
-                {
-                    label: 'Ligne centrale',
-                    data: Array(xbarData.means.length).fill(xbarData.center),
-                    borderColor: 'rgba(46, 204, 113, 1)',
-                    borderWidth: 1,
-                    fill: false,
-                    pointRadius: 0
-                },
-                {
-                    label: 'LIC',
-                    data: Array(xbarData.means.length).fill(xbarData.lcl),
-                    borderColor: 'rgba(231, 76, 60, 1)',
-                    borderWidth: 1,
-                    borderDash: [5, 5],
-                    fill: false,
-                    pointRadius: 0
-                }
+                createControlLineDataset('LSC', controlCharts.xbar.ucl, 'rgba(231, 76, 60, 1)'),
+                createControlLineDataset('Ligne centrale', controlCharts.xbar.center, 'rgba(46, 204, 113, 1)'),
+                createControlLineDataset('LIC', controlCharts.xbar.lcl, 'rgba(231, 76, 60, 1)')
             ]
         },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                y: {
-                    title: {
-                        display: true,
-                        text: 'Moyenne'
-                    }
-                },
-                x: {
-                    title: {
-                        display: true,
-                        text: 'Échantillons'
-                    }
-                }
-            },
-            plugins: {
-                title: {
-                    display: true,
-                    text: 'Carte de Contrôle X-bar (Moyennes)'
-                },
-                legend: {
-                    position: 'top'
-                }
-            }
-        }
+        options: getControlChartOptions('Carte de Contrôle X-bar', 'Échantillons', 'Moyenne')
     });
 }
 
-// Crée la carte de contrôle R
 function createRChart() {
-    const ctx = document.getElementById('rChart').getContext('2d');
-    const rData = analysisResults.controlCharts.r;
+    const ctx = document.getElementById('rChart');
+    if (!ctx) return;
     
-    // Détruire le graphique existant
-    if (charts.r) charts.r.destroy();
+    if (charts.r) {
+        charts.r.destroy();
+    }
     
-    charts.r = new Chart(ctx, {
+    const { controlCharts } = analysisResults;
+    const sampleCount = controlCharts.r.ranges.length;
+    
+    charts.r = new Chart(ctx.getContext('2d'), {
         type: 'line',
         data: {
-            labels: rData.ranges.map((_, i) => `Éch. ${i+1}`),
+            labels: Array.from({length: sampleCount}, (_, i) => `Éch. ${i+1}`),
             datasets: [
                 {
-                    label: 'Étendues des échantillons',
-                    data: rData.ranges,
+                    label: 'Étendues',
+                    data: controlCharts.r.ranges,
                     borderColor: 'rgba(155, 89, 182, 1)',
                     backgroundColor: 'rgba(155, 89, 182, 0.1)',
                     borderWidth: 2,
                     fill: false,
                     tension: 0.1
                 },
-                {
-                    label: 'LSC',
-                    data: Array(rData.ranges.length).fill(rData.ucl),
-                    borderColor: 'rgba(231, 76, 60, 1)',
-                    borderWidth: 1,
-                    borderDash: [5, 5],
-                    fill: false,
-                    pointRadius: 0
-                },
-                {
-                    label: 'Ligne centrale',
-                    data: Array(rData.ranges.length).fill(rData.center),
-                    borderColor: 'rgba(46, 204, 113, 1)',
-                    borderWidth: 1,
-                    fill: false,
-                    pointRadius: 0
-                },
-                {
-                    label: 'LIC',
-                    data: Array(rData.ranges.length).fill(rData.lcl),
-                    borderColor: 'rgba(231, 76, 60, 1)',
-                    borderWidth: 1,
-                    borderDash: [5, 5],
-                    fill: false,
-                    pointRadius: 0
-                }
+                createControlLineDataset('LSC', controlCharts.r.ucl, 'rgba(231, 76, 60, 1)'),
+                createControlLineDataset('Ligne centrale', controlCharts.r.center, 'rgba(46, 204, 113, 1)'),
+                createControlLineDataset('LIC', controlCharts.r.lcl, 'rgba(231, 76, 60, 1)')
             ]
         },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                y: {
-                    title: {
-                        display: true,
-                        text: 'Étendue'
-                    },
-                    beginAtZero: true
-                },
-                x: {
-                    title: {
-                        display: true,
-                        text: 'Échantillons'
-                    }
-                }
+        options: getControlChartOptions('Carte de Contrôle R', 'Échantillons', 'Étendue')
+    });
+}
+
+// Fonctions utilitaires pour les graphiques
+function calculateHistogram(data, bins = 10) {
+    const min = Math.min(...data);
+    const max = Math.max(...data);
+    const range = max - min;
+    const binWidth = range / bins;
+    
+    const histogram = Array(bins).fill(0);
+    const labels = [];
+    
+    for (let i = 0; i < bins; i++) {
+        const binStart = min + i * binWidth;
+        const binEnd = binStart + binWidth;
+        labels.push(`${binStart.toFixed(2)}`);
+    }
+    
+    data.forEach(value => {
+        const binIndex = Math.min(Math.floor((value - min) / binWidth), bins - 1);
+        histogram[binIndex]++;
+    });
+    
+    // Courbe normale théorique
+    const mean = data.reduce((s, v) => s + v, 0) / data.length;
+    const std = Math.sqrt(data.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / (data.length - 1));
+    
+    const normalCurve = labels.map((_, i) => {
+        const binCenter = min + (i + 0.5) * binWidth;
+        const pdf = (1 / (std * Math.sqrt(2 * Math.PI))) * 
+                   Math.exp(-0.5 * Math.pow((binCenter - mean) / std, 2));
+        return pdf * data.length * binWidth;
+    });
+    
+    return { labels, values: histogram, normalCurve };
+}
+
+function generateNormalCurve(mean, std, ti, ts, points = 100) {
+    const range = ts - ti;
+    const extendedRange = range * 1.5;
+    const start = mean - extendedRange / 2;
+    const end = mean + extendedRange / 2;
+    const step = (end - start) / points;
+    
+    const data = [];
+    for (let i = 0; i <= points; i++) {
+        const x = start + i * step;
+        const y = (1 / (std * Math.sqrt(2 * Math.PI))) * 
+                 Math.exp(-0.5 * Math.pow((x - mean) / std, 2));
+        data.push({ x, y: y * 100 });
+    }
+    
+    return data;
+}
+
+function createControlLineDataset(label, value, color) {
+    return {
+        label,
+        data: Array(analysisResults.descriptive.sampleCount).fill(value),
+        borderColor: color,
+        borderWidth: 1,
+        borderDash: [5, 5],
+        fill: false,
+        pointRadius: 0
+    };
+}
+
+function getChartOptions(title, xLabel, yLabel) {
+    return {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: {
+                position: 'top'
             },
-            plugins: {
+            title: {
+                display: true,
+                text: title,
+                font: {
+                    size: 16
+                }
+            }
+        },
+        scales: {
+            y: {
+                beginAtZero: true,
                 title: {
                     display: true,
-                    text: 'Carte de Contrôle R (Étendues)'
-                },
-                legend: {
-                    position: 'top'
+                    text: yLabel
+                }
+            },
+            x: {
+                title: {
+                    display: true,
+                    text: xLabel
                 }
             }
         }
-    });
+    };
 }
 
-// Exporte les résultats en différents formats
+function getCapabilityChartOptions(ti, ts, mean) {
+    const options = getChartOptions('Analyse de Capabilité', 'Valeurs', 'Densité de probabilité (%)');
+    
+    options.plugins.annotation = {
+        annotations: {
+            tiLine: {
+                type: 'line',
+                xMin: ti,
+                xMax: ti,
+                borderColor: 'rgba(231, 76, 60, 1)',
+                borderWidth: 2,
+                label: {
+                    display: true,
+                    content: 'TI',
+                    position: 'start',
+                    backgroundColor: 'rgba(231, 76, 60, 0.8)',
+                    color: 'white'
+                }
+            },
+            tsLine: {
+                type: 'line',
+                xMin: ts,
+                xMax: ts,
+                borderColor: 'rgba(231, 76, 60, 1)',
+                borderWidth: 2,
+                label: {
+                    display: true,
+                    content: 'TS',
+                    position: 'start',
+                    backgroundColor: 'rgba(231, 76, 60, 0.8)',
+                    color: 'white'
+                }
+            },
+            meanLine: {
+                type: 'line',
+                xMin: mean,
+                xMax: mean,
+                borderColor: 'rgba(46, 204, 113, 1)',
+                borderWidth: 2,
+                label: {
+                    display: true,
+                    content: 'Moyenne',
+                    position: 'end',
+                    backgroundColor: 'rgba(46, 204, 113, 0.8)',
+                    color: 'white'
+                }
+            }
+        }
+    };
+    
+    return options;
+}
+
+function getControlChartOptions(title, xLabel, yLabel) {
+    const options = getChartOptions(title, xLabel, yLabel);
+    options.scales.y.beginAtZero = true;
+    return options;
+}
+
+// Gestion des onglets
+function switchTab(tabId) {
+    // Désactiver tous les onglets
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    
+    // Activer l'onglet cliqué
+    const tabElement = document.querySelector(`.tab[data-tab="${tabId}"]`);
+    const contentElement = document.getElementById(`${tabId}Tab`);
+    
+    if (tabElement && contentElement) {
+        tabElement.classList.add('active');
+        contentElement.classList.add('active');
+    }
+}
+
+// Réinitialisation de l'application
+function resetApplication() {
+    // Réinitialiser les graphiques
+    Object.values(charts).forEach(chart => {
+        if (chart) chart.destroy();
+    });
+    charts = {
+        normality: null,
+        capability: null,
+        xbar: null,
+        r: null
+    };
+    
+    // Réinitialiser les données
+    dataSamples = [];
+    rawData = [];
+    analysisResults = {};
+    
+    // Réinitialiser la configuration
+    userSampleConfig = {
+        sampleCount: 3,
+        sampleSize: 5
+    };
+    
+    // Réinitialiser l'affichage
+    document.getElementById('resultsSection').style.display = 'none';
+    document.getElementById('exportBtn').disabled = true;
+    document.getElementById('loadingIndicator').style.display = 'none';
+    document.getElementById('configInfo').innerHTML = '';
+    
+    // Réinitialiser les valeurs par défaut
+    document.getElementById('ts').value = 20.1;
+    document.getElementById('ti').value = 19.9;
+    document.getElementById('nqa').value = 0.1;
+    document.getElementById('dataType').value = 'sample';
+    
+    // Réinitialiser la zone de saisie
+    initializeInputArea();
+}
+
+// Exportation des résultats
 function exportResults() {
-    // Créer un workbook Excel
-    const wb = XLSX.utils.book_new();
+    if (!analysisResults.descriptive) {
+        alert('Aucune donnée à exporter. Veuillez d\'abord calculer les statistiques.');
+        return;
+    }
     
-    // Feuille 1: Résumé
-    const summaryData = [
-        ['Paramètre', 'Valeur'],
-        ['Moyenne', analysisResults.descriptive.mean.toFixed(4)],
-        ['Écart-type', analysisResults.descriptive.std.toFixed(4)],
-        ['Cp', analysisResults.capability.cp],
-        ['Cpk', analysisResults.capability.cpk],
-        ['Cm', analysisResults.capability.cm],
-        ['Cmk', analysisResults.capability.cmk],
-        ['Statistique W (Shapiro-Wilk)', analysisResults.normality.w],
-        ['Valeur critique (5%)', analysisResults.normality.criticalValue],
-        ['Conclusion normalité', analysisResults.normality.message]
-    ];
-    
-    const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
-    XLSX.utils.book_append_sheet(wb, wsSummary, 'Résumé');
-    
-    // Feuille 2: Données brutes
-    const rawDataSheet = [
-        ['Index', 'Valeur'],
-        ...analysisResults.descriptive.data.map((value, index) => [index + 1, value])
-    ];
-    
-    const wsRawData = XLSX.utils.aoa_to_sheet(rawDataSheet);
-    XLSX.utils.book_append_sheet(wb, wsRawData, 'Données brutes');
-    
-    // Feuille 3: Statistiques par échantillon
-    const sampleStats = [
-        ['Échantillon', 'Moyenne', 'Étendue'],
-        ...analysisResults.controlCharts.xbar.means.map((mean, index) => [
-            `Éch. ${index + 1}`,
-            mean,
-            analysisResults.controlCharts.r.ranges[index]
-        ])
-    ];
-    
-    const wsSampleStats = XLSX.utils.aoa_to_sheet(sampleStats);
-    XLSX.utils.book_append_sheet(wb, wsSampleStats, 'Statistiques échantillons');
-    
-    // Feuille 4: Limites de contrôle
-    const controlLimits = [
-        ['Paramètre', 'Valeur'],
-        ['LSC X-bar', analysisResults.controlCharts.xbar.ucl.toFixed(4)],
-        ['Ligne centrale X-bar', analysisResults.controlCharts.xbar.center.toFixed(4)],
-        ['LIC X-bar', analysisResults.controlCharts.xbar.lcl.toFixed(4)],
-        ['LSC R', analysisResults.controlCharts.r.ucl.toFixed(4)],
-        ['Ligne centrale R', analysisResults.controlCharts.r.center.toFixed(4)],
-        ['LIC R', analysisResults.controlCharts.r.lcl.toFixed(4)]
-    ];
-    
-    const wsControlLimits = XLSX.utils.aoa_to_sheet(controlLimits);
-    XLSX.utils.book_append_sheet(wb, wsControlLimits, 'Limites de contrôle');
-    
-    // Générer le fichier Excel
-    const fileName = `CQAS_Analyse_${new Date().toISOString().slice(0, 10)}.xlsx`;
-    XLSX.writeFile(wb, fileName);
-    
-    // Exporter également en CSV pour les données brutes
-    exportToCSV();
+    try {
+        // Création du workbook
+        const wb = XLSX.utils.book_new();
+        
+        // Feuille 1: Résumé
+        const summaryData = [
+            ['CQAS - Rapport d\'Analyse Statistique', '', ''],
+            ['Date', new Date().toLocaleDateString('fr-FR'), ''],
+            ['Heure', new Date().toLocaleTimeString('fr-FR'), ''],
+            ['', '', ''],
+            ['CONFIGURATION DE L\'ANALYSE', '', ''],
+            ['Mode de saisie', document.getElementById('dataType').value === 'sample' ? 'Par échantillons' : 'Données brutes', ''],
+            ['TS (Tolérance Supérieure)', analysisResults.capability.ts, ''],
+            ['TI (Tolérance Inférieure)', analysisResults.capability.ti, ''],
+            ['NQA', analysisResults.capability.nqa + '%', ''],
+            ['', '', ''],
+            ['RÉSULTATS STATISTIQUES', 'VALEUR', 'INTERPRÉTATION'],
+            ['Nombre total de données', analysisResults.descriptive.n, ''],
+            ['Nombre d\'échantillons', analysisResults.descriptive.sampleCount, ''],
+            ['Taille des échantillons', analysisResults.descriptive.sampleSize, ''],
+            ['Moyenne globale', analysisResults.descriptive.mean.toFixed(4), ''],
+            ['Écart-type global', analysisResults.descriptive.std.toFixed(4), ''],
+            ['Minimum', analysisResults.descriptive.min.toFixed(4), ''],
+            ['Maximum', analysisResults.descriptive.max.toFixed(4), ''],
+            ['Étendue totale', analysisResults.descriptive.range.toFixed(4), ''],
+            ['', '', ''],
+            ['ANALYSE DE CAPABILITÉ', 'VALEUR', 'INTERPRÉTATION'],
+            ['Cp (Capabilité du procédé)', analysisResults.capability.cp, interpretCp(analysisResults.capability.cp)],
+            ['Cpk (Capabilité centrée)', analysisResults.capability.cpk, interpretCpk(analysisResults.capability.cpk)],
+            ['Cm (Capabilité machine)', analysisResults.capability.cm, interpretCp(analysisResults.capability.cm)],
+            ['Cmk (Capabilité machine centrée)', analysisResults.capability.cmk, interpretCpk(analysisResults.capability.cmk)],
+            ['Sigma_i (variation intra-échantillon)', analysisResults.capability.sigma_i, ''],
+            ['% hors tolérance estimé', analysisResults.capability.outOfTolerance + '%', ''],
+            ['', '', ''],
+            ['TEST DE NORMALITÉ', 'VALEUR', 'INTERPRÉTATION'],
+            ['Statistique W (Shapiro-Wilk)', analysisResults.normality.w, ''],
+            ['Valeur critique (5%)', analysisResults.normality.criticalValue, ''],
+            ['Valeur p', analysisResults.normality.pValue, ''],
+            ['Conclusion', analysisResults.normality.message, analysisResults.normality.isNormal ? 'Normal' : 'Non normal']
+        ];
+        
+        const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
+        XLSX.utils.book_append_sheet(wb, wsSummary, 'Résumé');
+        
+        // Feuille 2: Données brutes
+        const rawDataSheet = [
+            ['INDEX', 'VALEUR', 'ÉCHANTILLON', 'MESURE'],
+            ...analysisResults.descriptive.data.map((value, index) => {
+                const sampleIndex = Math.floor(index / analysisResults.descriptive.sampleSize) + 1;
+                const measureIndex = (index % analysisResults.descriptive.sampleSize) + 1;
+                return [index + 1, value, `Éch. ${sampleIndex}`, `M${measureIndex}`];
+            })
+        ];
+        
+        const wsRawData = XLSX.utils.aoa_to_sheet(rawDataSheet);
+        XLSX.utils.book_append_sheet(wb, wsRawData, 'Données brutes');
+        
+        // Feuille 3: Statistiques par échantillon
+        const sampleStats = [
+            ['ÉCHANTILLON', 'TAILLE', 'MOYENNE', 'ÉTENDUE', 'ÉCART-TYPE', 'MIN', 'MAX'],
+            ...analysisResults.descriptive.sampleStats.map((stats, index) => [
+                `Éch. ${index + 1}`,
+                stats.size,
+                stats.mean.toFixed(4),
+                stats.range.toFixed(4),
+                stats.std.toFixed(4),
+                Math.min(...stats.values).toFixed(4),
+                Math.max(...stats.values).toFixed(4)
+            ])
+        ];
+        
+        const wsSampleStats = XLSX.utils.aoa_to_sheet(sampleStats);
+        XLSX.utils.book_append_sheet(wb, wsSampleStats, 'Statistiques échantillons');
+        
+        // Feuille 4: Limites de contrôle
+        const controlLimits = [
+            ['CARTE DE CONTRÔLE X-bar', 'VALEUR'],
+            ['LSC (Limite Supérieure de Contrôle)', analysisResults.controlCharts.xbar.ucl.toFixed(4)],
+            ['Ligne centrale', analysisResults.controlCharts.xbar.center.toFixed(4)],
+            ['LIC (Limite Inférieure de Contrôle)', analysisResults.controlCharts.xbar.lcl.toFixed(4)],
+            ['', ''],
+            ['CARTE DE CONTRÔLE R', 'VALEUR'],
+            ['LSC (Limite Supérieure de Contrôle)', analysisResults.controlCharts.r.ucl.toFixed(4)],
+            ['Ligne centrale', analysisResults.controlCharts.r.center.toFixed(4)],
+            ['LIC (Limite Inférieure de Contrôle)', analysisResults.controlCharts.r.lcl.toFixed(4)],
+            ['', ''],
+            ['CONSTANTES STATISTIQUES', 'VALEUR'],
+            ['A2 (pour X-bar)', analysisResults.controlCharts.constants.a2],
+            ['D3 (pour R)', analysisResults.controlCharts.constants.d3],
+            ['D4 (pour R)', analysisResults.controlCharts.constants.d4],
+            ['d2 (pour sigma_i)', analysisResults.controlCharts.constants.d2]
+        ];
+        
+        const wsControlLimits = XLSX.utils.aoa_to_sheet(controlLimits);
+        XLSX.utils.book_append_sheet(wb, wsControlLimits, 'Limites de contrôle');
+        
+        // Générer le nom de fichier
+        const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+        const timeStr = new Date().toISOString().slice(11, 19).replace(/:/g, '');
+        const fileName = `CQAS_Analyse_${dateStr}_${timeStr}.xlsx`;
+        
+        // Télécharger le fichier
+        XLSX.writeFile(wb, fileName);
+        
+        // Confirmation
+        alert(`Rapport exporté avec succès sous le nom : ${fileName}`);
+        
+    } catch (error) {
+        console.error('Erreur lors de l\'exportation:', error);
+        alert('Une erreur est survenue lors de l\'exportation.');
+    }
 }
 
-// Exporte les données en CSV
-function exportToCSV() {
-    // Créer le contenu CSV
-    let csvContent = "Index,Valeur\n";
-    
-    analysisResults.descriptive.data.forEach((value, index) => {
-        csvContent += `${index + 1},${value}\n`;
-    });
-    
-    // Créer un blob et un lien de téléchargement
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `CQAS_Donnees_brutes_${new Date().toISOString().slice(0, 10)}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-}
-
+// Initialisation au chargement
+document.addEventListener('DOMContentLoaded', initializeApp);

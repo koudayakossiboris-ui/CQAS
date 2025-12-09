@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CQAS - Contrôle Qualité par Attributs avec Shapiro</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+    <header>
+        <h1>CQAS</h1>
+        <p class="subtitle">Contrôle Qualité par Attributs avec Méthode Shapiro</p>
+    </header>
+    
+    <div class="container">
+        <div class="card">
+            <h2 class="card-title">Saisie des Données</h2>
+            <div class="input-section">
+                <div>
+                    <div class="form-group">
+                        <label for="dataType">Type de données :</label>
+                        <select id="dataType">
+                            <option value="sample">Par échantillons (n*k ≤ 50)</option>
+                            <option value="raw">Liste de valeurs brutes</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="ts">Tolérance Supérieure (TS) :</label>
+                        <input type="number" id="ts" step="0.001" value="20.1">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="ti">Tolérance Inférieure (TI) :</label>
+                        <input type="number" id="ti" step="0.001" value="19.9">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="nqa">NQA (Niveau de Qualité Acceptable) :</label>
+                        <input type="number" id="nqa" step="0.001" value="0.1">
+                        <span class="help-text">En pourcentage (%)</span>
+                    </div>
+                </div>
+                
+                <div id="inputArea">
+                    <!-- Zone de saisie dynamique selon le type choisi -->
+                </div>
+            </div>
+            
+            <div class="btn-group">
+                <button id="calculateBtn" class="btn">Calculer les Statistiques</button>
+                <button id="resetBtn" class="btn btn-accent">Réinitialiser</button>
+                <button id="exportBtn" class="btn btn-success" disabled>Exporter les Résultats</button>
+            </div>
+        </div>
+        
+        <div class="loading" id="loadingIndicator">
+            <div class="spinner"></div>
+            <p>Calcul en cours...</p>
+        </div>
+        
+        <div class="card results-section" id="resultsSection">
+            <h2 class="card-title">Résultats de l'Analyse</h2>
+            
+            <div class="tabs">
+                <div class="tab active" data-tab="summary">Résumé</div>
+                <div class="tab" data-tab="stats">Statistiques</div>
+                <div class="tab" data-tab="normality">Normalité</div>
+                <div class="tab" data-tab="capability">Capabilité</div>
+                <div class="tab" data-tab="control-charts">Cartes de Contrôle</div>
+            </div>
+            
+            <div class="tab-content active" id="summaryTab">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value" id="meanValue">-</div>
+                        <div class="stat-label">Moyenne</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stdValue">-</div>
+                        <div class="stat-label">Écart-type</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="cpValue">-</div>
+                        <div class="stat-label">Cp</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="cpkValue">-</div>
+                        <div class="stat-label">Cpk</div>
+                    </div>
+                </div>
+                
+                <div class="conclusion" id="conclusion">
+                    <!-- Conclusion dynamique -->
+                </div>
+            </div>
+            
+            <div class="tab-content" id="statsTab">
+                <h3>Statistiques Descriptives</h3>
+                <div class="table-container">
+                    <table>
+                        <tr>
+                            <th>Paramètre</th>
+                            <th>Valeur</th>
+                        </tr>
+                        <tr>
+                            <td>Nombre d'échantillons</td>
+                            <td id="sampleCount">-</td>
+                        </tr>
+                        <tr>
+                            <td>Taille des échantillons</td>
+                            <td id="sampleSize">-</td>
+                        </tr>
+                        <tr>
+                            <td>Moyenne globale</td>
+                            <td id="globalMean">-</td>
+                        </tr>
+                        <tr>
+                            <td>Écart-type global</td>
+                            <td id="globalStd">-</td>
+                        </tr>
+                        <tr>
+                            <td>Étendue moyenne</td>
+                            <td id="avgRange">-</td>
+                        </tr>
+                        <tr>
+                            <td>Variance</td>
+                            <td id="variance">-</td>
+                        </tr>
+                    </table>
+                </div>
+                
+                <h3>Données Brutes</h3>
+                <div class="table-container">
+                    <table id="rawDataTable">
+                        <!-- Données brutes affichées dynamiquement -->
+                    </table>
+                </div>
+            </div>
+            
+            <div class="tab-content" id="normalityTab">
+                <h3>Test de Normalité de Shapiro-Wilk</h3>
+                <div class="chart-container">
+                    <canvas id="normalityChart"></canvas>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <tr>
+                            <th>Paramètre</th>
+                            <th>Valeur</th>
+                            <th>Interprétation</th>
+                        </tr>
+                        <tr>
+                            <td>Statistique W</td>
+                            <td id="shapiroW">-</td>
+                            <td id="shapiroWInt">-</td>
+                        </tr>
+                        <tr>
+                            <td>Valeur critique (5%)</td>
+                            <td id="criticalValue">-</td>
+                            <td>-</td>
+                        </tr>
+                        <tr>
+                            <td>Conclusion</td>
+                            <td colspan="2" id="normalityConclusion">-</td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+            
+            <div class="tab-content" id="capabilityTab">
+                <h3>Analyse de Capabilité</h3>
+                <div class="chart-container">
+                    <canvas id="capabilityChart"></canvas>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <tr>
+                            <th>Indice</th>
+                            <th>Valeur</th>
+                            <th>Interprétation</th>
+                        </tr>
+                        <tr>
+                            <td>Cp (Capabilité du procédé)</td>
+                            <td id="cpResult">-</td>
+                            <td id="cpInterpretation">-</td>
+                        </tr>
+                        <tr>
+                            <td>Cpk (Capabilité centrée)</td>
+                            <td id="cpkResult">-</td>
+                            <td id="cpkInterpretation">-</td>
+                        </tr>
+                        <tr>
+                            <td>Cm (Capabilité machine)</td>
+                            <td id="cmResult">-</td>
+                            <td id="cmInterpretation">-</td>
+                        </tr>
+                        <tr>
+                            <td>Cmk (Capabilité machine centrée)</td>
+                            <td id="cmkResult">-</td>
+                            <td id="cmkInterpretation">-</td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+            
+            <div class="tab-content" id="controlChartsTab">
+                <h3>Cartes de Contrôle</h3>
+                <div class="chart-container">
+                    <canvas id="xbarChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <canvas id="rChart"></canvas>
+                </div>
+                
+                <h3>Limites de Contrôle</h3>
+                <div class="table-container">
+                    <table>
+                        <tr>
+                            <th>Paramètre</th>
+                            <th>Valeur</th>
+                        </tr>
+                        <tr>
+                            <td>LSC X-bar</td>
+                            <td id="xbarUcl">-</td>
+                        </tr>
+                        <tr>
+                            <td>Ligne Centrale X-bar</td>
+                            <td id="xbarCenter">-</td>
+                        </tr>
+                        <tr>
+                            <td>LIC X-bar</td>
+                            <td id="xbarLcl">-</td>
+                        </tr>
+                        <tr>
+                            <td>LSC R</td>
+                            <td id="rUcl">-</td>
+                        </tr>
+                        <tr>
+                            <td>Ligne Centrale R</td>
+                            <td id="rCenter">-</td>
+                        </tr>
+                        <tr>
+                            <td>LIC R</td>
+                            <td id="rLcl">-</td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <footer>
+        <p>CQAS - Application de Contrôle Qualité par Attributs avec Méthode Shapiro</p>
+        <p>© 2025 - Développé pour les besoins du contrôle qualité statistique</p>
+        <P>Droit d'auteur Koudaya-Kossi-Boris/ contact:koudayakossiboris@gmail.com</P>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
